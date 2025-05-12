@@ -22,11 +22,19 @@ class CropOnDistinctMarkers(ImagePreprocessor):
 
         # options with defaults
         self.marker_paths = {}
+        self.missing_markers = 0
         for corner in CORNERS:
-            self.marker_paths[corner] = os.path.join(
-                self.relative_dir,
-                marker_ops.get(f"relativePath{corner}", f"omr_marker_{corner}.jpg"),
-            )
+            if marker_ops.get(f"relativePath{corner}", "") == "":
+                self.marker_paths[corner] = None
+                self.missing_markers += 1
+            else:
+                self.marker_paths[corner] = os.path.join(
+                    self.relative_dir,
+                    marker_ops.get(f"relativePath{corner}"),
+                )
+        if self.missing_markers > 1:
+            logger.error("Need at least three corner markers to be specified")
+            exit(31)
         self.min_matching_threshold = marker_ops.get("min_matching_threshold", 0.3)
         self.max_matching_variation = marker_ops.get("max_matching_variation", 0.41)
         self.marker_rescale_range = tuple(
@@ -40,7 +48,7 @@ class CropOnDistinctMarkers(ImagePreprocessor):
         return f"<{self.marker_paths['UL']}, {self.marker_paths['UR']}, {self.marker_paths['LL']}, {self.marker_paths['LR']}>"
 
     def exclude_files(self):
-        return list(self.marker_paths.values())
+        return list(path for path in self.marker_paths.values() if path is not None)
 
     def apply_filter(self, image, file_path):
         config = self.tuning_config
@@ -50,7 +58,7 @@ class CropOnDistinctMarkers(ImagePreprocessor):
             if self.apply_erode_subtract
             else (image - cv2.erode(image, kernel=np.ones((5, 5)), iterations=5))
         )
-         # Quads on warped image
+        # Quads on warped image
         quads = {}
         origins = {}
         h1, w1 = image_eroded_sub.shape[:2]
@@ -78,18 +86,22 @@ class CropOnDistinctMarkers(ImagePreprocessor):
         _h = {}
         w = {}
         for corner in CORNERS:
+            if self.markers[corner] is None:
+                continue
             optimal_markers[corner] = ImageUtils.resize_util_h(
                 self.markers[corner],
                 u_height=int(self.markers[corner].shape[0] * best_scale),
             )
             _h[corner], w[corner] = optimal_markers[corner].shape[:2]
-        outer_corners = []
+        outer_corners = {}
         # add on (width, height) multiple of _h and w compared to top left
         # corner of marker
         outer_corner_factors = {"UL": [0, 0], "UR": [1, 0], "LL": [0, 1], "LR": [1, 1]}
         sum_t, max_t = 0, 0
         quarter_match_log = "Matching Marker:  "
         for corner in CORNERS:
+            if self.markers[corner] is None:
+                continue
             res = cv2.matchTemplate(
                 quads[corner], optimal_markers[corner], cv2.TM_CCOEFF_NORMED
             )
@@ -147,20 +159,61 @@ class CropOnDistinctMarkers(ImagePreprocessor):
                 (50, 50, 50) if self.apply_erode_subtract else (155, 155, 155),
                 4,
             )
-            outer_corners.append(
-                [
-                    pt[0] + w[corner] * outer_corner_factors[corner][0],
-                    pt[1] + _h[corner] * outer_corner_factors[corner][1],
-                ]
-            )
+            outer_corners[corner] = [
+                pt[0] + w[corner] * outer_corner_factors[corner][0],
+                pt[1] + _h[corner] * outer_corner_factors[corner][1],
+            ]
             sum_t += max_t
+
+        if self.missing_markers == 1:
+            # We assume that the transform is affine, and compute the missing
+            # corner accordingly.  Affine transforms send rectangles to
+            # parallelograms, so the two diagonals intersect at their midpoints
+            if self.markers["UL"] is None:
+                outer_corners["UL"] = [
+                    outer_corners["LL"][0]
+                    + outer_corners["UR"][0]
+                    - outer_corners["LR"][0],
+                    outer_corners["LL"][1]
+                    + outer_corners["UR"][1]
+                    - outer_corners["LR"][1],
+                ]
+            elif self.markers["UR"] is None:
+                outer_corners["UR"] = [
+                    outer_corners["LR"][0]
+                    + outer_corners["UL"][0]
+                    - outer_corners["LL"][0],
+                    outer_corners["LR"][1]
+                    + outer_corners["UL"][1]
+                    - outer_corners["LL"][1],
+                ]
+            elif self.markers["LL"] is None:
+                outer_corners["LL"] = [
+                    outer_corners["LR"][0]
+                    + outer_corners["UL"][0]
+                    - outer_corners["UR"][0],
+                    outer_corners["LR"][1]
+                    + outer_corners["UL"][1]
+                    - outer_corners["UR"][1],
+                ]
+            elif self.markers["LR"] is None:
+                outer_corners["LR"] = [
+                    outer_corners["LL"][0]
+                    + outer_corners["UR"][0]
+                    - outer_corners["UL"][0],
+                    outer_corners["LL"][1]
+                    + outer_corners["UR"][1]
+                    - outer_corners["UL"][1],
+                ]
 
         logger.info(quarter_match_log)
         logger.info(f"Optimal Scale: {best_scale}")
         # analysis data
         self.threshold_circles.append(sum_t / 4)
 
-        image = ImageUtils.four_point_transform(image, np.array(outer_corners))
+        image = ImageUtils.four_point_transform(
+            image, np.array(list(outer_corners.values()))
+        )
         # appendSaveImg(1,image_eroded_sub)
         # appendSaveImg(1,image_norm)
 
@@ -194,6 +247,9 @@ class CropOnDistinctMarkers(ImagePreprocessor):
         markers = {}
 
         for corner in CORNERS:
+            if self.marker_paths[corner] is None:
+                markers[corner] = None
+                continue
             if not os.path.exists(self.marker_paths[corner]):
                 logger.error(
                     "Marker not found at path provided in template:",
@@ -229,6 +285,8 @@ class CropOnDistinctMarkers(ImagePreprocessor):
         ) // self.marker_rescale_steps
         _h = {}
         for corner in CORNERS:
+            if self.markers[corner] is None:
+                continue
             _h[corner] = self.markers[corner].shape[0]
         res, best_scale = None, None
         all_max_t = 0
@@ -243,6 +301,8 @@ class CropOnDistinctMarkers(ImagePreprocessor):
                 continue
             max_ts = []
             for corner in CORNERS:
+                if self.markers[corner] is None:
+                    continue
                 rescaled_marker = ImageUtils.resize_util_h(
                     self.markers[corner], u_height=int(_h[corner] * s)
                 )
