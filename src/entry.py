@@ -1,11 +1,12 @@
 """
 
- OMRChecker
+OMRChecker
 
- Author: Udayraj Deshmukh
- Github: https://github.com/Udayraj123
+Author: Udayraj Deshmukh
+Github: https://github.com/Udayraj123
 
 """
+
 import os
 from csv import QUOTE_NONNUMERIC
 from pathlib import Path
@@ -53,10 +54,13 @@ def print_config_summary(
     table.add_row("Count of Images", f"{len(omr_files)}")
     table.add_row("Set Layout Mode ", "ON" if args["setLayout"] else "OFF")
     pre_processor_names = [pp.__class__.__name__ for pp in template.pre_processors]
-    table.add_row(
-        "Markers Detection",
-        "ON" if "CropOnMarkers" in pre_processor_names else "OFF",
-    )
+    if (
+        "CropOnMarkers" in pre_processor_names
+        or "CropOnDistinctMarkers" in pre_processor_names
+    ):
+        table.add_row("Markers Detection", "ON")
+    else:
+        table.add_row("Markers Detection", "OFF")
     table.add_row("Auto Alignment", f"{tuning_config.alignment_params.auto_align}")
     table.add_row("Detected Template Path", f"{template}")
     if local_config_path:
@@ -275,7 +279,10 @@ def process_files(
         score = 0
         if evaluation_config is not None:
             score = evaluate_concatenated_response(
-                omr_response, evaluation_config, file_path, outputs_namespace.paths.evaluation_dir
+                omr_response,
+                evaluation_config,
+                file_path,
+                outputs_namespace.paths.evaluation_dir,
             )
             logger.info(
                 f"(/{files_counter}) Graded with score: {round(score, 2)}\t for file: '{file_id}'"

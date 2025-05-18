@@ -71,6 +71,7 @@ TEMPLATE_SCHEMA = {
                         "type": "string",
                         "enum": [
                             "CropOnMarkers",
+                            "CropOnDistinctMarkers",
                             "CropPage",
                             "FeatureBasedAlignment",
                             "GaussianBlur",
@@ -98,6 +99,35 @@ TEMPLATE_SCHEMA = {
                                         "sheetToMarkerWidthRatio": {"type": "number"},
                                     },
                                     "required": ["relativePath"],
+                                }
+                            }
+                        },
+                    },
+                    {
+                        "if": {"properties": {"name": {"const": "CropOnDistinctMarkers"}}},
+                        "then": {
+                            "properties": {
+                                "options": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "apply_erode_subtract": {"type": "boolean"},
+                                        "marker_rescale_range": two_positive_numbers,
+                                        "marker_rescale_steps": {"type": "number"},
+                                        "max_matching_variation": {"type": "number"},
+                                        "min_matching_threshold": {"type": "number"},
+                                        "relativePathUL": {"type": "string"},
+                                        "relativePathUR": {"type": "string"},
+                                        "relativePathLL": {"type": "string"},
+                                        "relativePathLR": {"type": "string"},
+                                        "sheetToMarkerWidthRatio": {"type": "number"},
+                                    },
+                                    "required": [
+                                        "relativePathUL",
+                                        "relativePathUR",
+                                        "relativePathLL",
+                                        "relativePathLR"
+                                    ],
                                 }
                             }
                         },
